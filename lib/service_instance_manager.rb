@@ -1,5 +1,6 @@
 class ServiceInstanceManager
   class ServiceInstanceNotFound < StandardError; end
+  class ServiceInstanceAlreadyAttached < StandardError; end
   class ServicePlanNotFound < StandardError; end
   class InvalidServicePlanUpdate < StandardError; end
 
@@ -49,8 +50,16 @@ class ServiceInstanceManager
     guid = opts[:guid]
     instance = ServiceInstance.find_by_guid(guid)
     raise ServiceInstanceNotFound if instance.nil?
-    instance.destroy
-    Database.drop(database_name_from_service_instance_guid(guid))
+    if guid == instance.attached_instance_guid && !instance.deleted
+      instance.attached_instance_guid = NIL
+      instance.save
+    else if guid ==instance.guid && instance.attached_instance_guid != NIL
+      instance.deleted = true
+      instance.save
+    else
+      instance.destroy
+      Database.drop(database_name_from_service_instance_guid(guid))
+    end
   end
 
   def self.database_name_from_service_instance_guid(guid)

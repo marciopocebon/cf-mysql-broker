@@ -3,6 +3,18 @@ class V2::ServiceInstancesController < V2::BaseController
   # This is actually the create
   def update
     plan_guid = params.fetch(:plan_id)
+    instance_guid = params.fetch(:id)
+    parameters = params.fetch(:parameters, NIL)
+
+    if !parameters.nil? && parameters.key?(:source_guid)
+      source_guid = parameters[:source_guid]
+      instance = ServiceInstance.find_by_guid(source_guid)
+      raise ServiceInstanceNotFound if instance.nil?
+      raise ServiceInstanceAlreadyAttached if instance.attached_instance_guid != NIL
+      instance.attached_instance_guid = instance_guid
+      instance.save
+      return render status: 201, json: { dashboard_url: build_dashboard_url(instance) }
+    end
 
     unless Catalog.has_plan?(plan_guid)
       return render status: 422, json: {'description' => "Cannot create a service instance. Plan #{plan_guid} was not found in the catalog."}
@@ -11,7 +23,6 @@ class V2::ServiceInstancesController < V2::BaseController
     plan_max_storage_mb = Catalog.storage_quota_for_plan_guid(plan_guid)
 
     if ServiceCapacity.can_allocate?(plan_max_storage_mb)
-      instance_guid = params.fetch(:id)
       instance = ServiceInstanceManager.create(guid: instance_guid, plan_guid: plan_guid)
 
       render status: 201, json: { dashboard_url: build_dashboard_url(instance) }
