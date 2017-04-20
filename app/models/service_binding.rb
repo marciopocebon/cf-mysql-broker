@@ -76,7 +76,7 @@ class ServiceBinding < BaseModel
   end
 
   def database_name
-    ServiceInstanceManager.database_name_from_service_instance_guid(service_instance.guid)
+    service_instance.db_name
   end
 
   def username

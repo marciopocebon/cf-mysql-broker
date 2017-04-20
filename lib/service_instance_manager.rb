@@ -9,6 +9,8 @@ class ServiceInstanceManager
   def self.create(opts)
     guid = opts[:guid]
     plan_guid = opts[:plan_guid]
+    attach_guid = opts[:attach_guid]
+    datacenter = opts[:datacenter]
 
     unless Catalog.has_plan?(plan_guid)
       raise "Plan #{plan_guid} was not found in the catalog."
@@ -22,8 +24,15 @@ class ServiceInstanceManager
 
     db_name = database_name_from_service_instance_guid(guid)
 
-    Database.create(db_name)
-    ServiceInstance.create(guid: guid, plan_guid: plan_guid, max_storage_mb: max_storage_mb, db_name: db_name)
+    if attach_guid != NIL
+      instance = ServiceInstance.find_by_guid(attach_guid)
+      raise ServiceInstanceNotFound if instance.nil?
+      db_name = instance.db_name
+    else
+      Database.create(db_name)
+    end
+
+    ServiceInstance.create(guid: guid, plan_guid: plan_guid, max_storage_mb: max_storage_mb, db_name: db_name, datacenter: datacenter)
   end
 
   def self.set_plan(opts)
@@ -37,7 +46,7 @@ class ServiceInstanceManager
     instance = ServiceInstance.find_by_guid(guid)
     raise ServiceInstanceNotFound if instance.nil?
 
-    if Database.usage(database_name_from_service_instance_guid(guid)) > Catalog.storage_quota_for_plan_guid(plan_guid)
+    if Database.usage(instance.db_name) > Catalog.storage_quota_for_plan_guid(plan_guid)
       raise InvalidServicePlanUpdate.new('Downgrading this service instance will violate the quota of the new plan')
     end
 
@@ -50,15 +59,11 @@ class ServiceInstanceManager
     guid = opts[:guid]
     instance = ServiceInstance.find_by_guid(guid)
     raise ServiceInstanceNotFound if instance.nil?
-    if guid == instance.attached_instance_guid && !instance.deleted
-      instance.attached_instance_guid = NIL
-      instance.save
-    else if guid ==instance.guid && instance.attached_instance_guid != NIL
-      instance.deleted = true
-      instance.save
-    else
-      instance.destroy
-      Database.drop(database_name_from_service_instance_guid(guid))
+    db_name = instance.db_name
+    instance.destroy
+
+    if ServiceInstance.where(db_name: db_name).count == 0
+      Database.drop(db_name)
     end
   end
 
