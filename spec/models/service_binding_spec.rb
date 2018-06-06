@@ -20,6 +20,7 @@ describe ServiceBinding do
     allow(SecureRandom).to receive(:base64).and_return(password, 'notthepassword')
     allow(Database).to receive(:exists?).with(database).and_return(true)
     allow(Catalog).to receive(:connection_quota_for_plan_guid).with(plan_guid).and_return(connection_quota)
+    allow(Settings).to receive(:allow_table_locks).and_return(true)
   end
 
   after do
@@ -115,8 +116,6 @@ GRANT USAGE ON *.* TO '#{users[0]}'@'%'
 WITH MAX_USER_CONNECTIONS #{plan.max_user_connections}
 SQL
       )
-      expect(connection).to receive(:execute).with("FLUSH PRIVILEGES")
-
       ServiceBinding.update_all_max_user_connections
     end
   end
@@ -181,19 +180,43 @@ SQL
       }.from(0).to(1)
     end
 
-    it 'grants the user all privileges except for LOCK TABLES' do
-      expect {
-        connection.select_values("SHOW GRANTS FOR #{username}")
-      }.to raise_error(ActiveRecord::StatementInvalid, /no such grant/)
+    context 'when table locks are enabled' do
+      it 'grants the user all privileges including for LOCK TABLES' do
+        expect {
+          connection.select_values("SHOW GRANTS FOR #{username}")
+        }.to raise_error(ActiveRecord::StatementInvalid, /no such grant/)
 
-      binding.save
+        binding.save
 
-      grants = connection.select_values("SHOW GRANTS FOR #{username}")
+        grants = connection.select_values("SHOW GRANTS FOR #{username}")
 
-      matching_grants = grants.select { |grant| grant.match(/GRANT .* ON `#{database}`\.\* TO '#{username}'@'%'/) }
+        matching_grants = grants.select { |grant| grant.match(/GRANT .* ON `#{database}`\.\* TO '#{username}'@'%'/) }
 
-      expect(matching_grants.length).to eq(1)
-      expect(matching_grants[0]).not_to include("LOCK TABLES")
+        expect(matching_grants.length).to eq(1)
+        expect(matching_grants[0]).to include("ALL PRIVILEGES")
+      end
+    end
+
+    context 'when table locks are disabled' do
+      before do
+        allow(Settings).to receive(:allow_table_locks).and_return(false)
+      end
+
+      it 'grants the user all privileges except for LOCK TABLES' do
+        expect {
+          connection.select_values("SHOW GRANTS FOR #{username}")
+        }.to raise_error(ActiveRecord::StatementInvalid, /no such grant/)
+
+        binding.save
+
+        grants = connection.select_values("SHOW GRANTS FOR #{username}")
+
+        matching_grants = grants.select { |grant| grant.match(/GRANT .* ON `#{database}`\.\* TO '#{username}'@'%'/) }
+
+        expect(matching_grants.length).to eq(1)
+        expect(matching_grants[0]).not_to include("ALL PRIVILEGES")
+        expect(matching_grants[0]).not_to include("LOCK TABLES")
+      end
     end
 
     it 'sets the max connections to the value specified by the plan' do
@@ -251,6 +274,31 @@ SQL
         }
       end
     end
+
+    context 'when read_only is true' do
+      before do
+        binding.read_only = true
+      end
+
+      it 'creates an entry in the read-only table' do
+        binding.save
+
+        read_only_user = ReadOnlyUser.find_by_username(username)
+        expect(read_only_user).to be_present
+        expect(read_only_user.grantee).to eq("'#{username}'@'%'")
+      end
+
+      it 'grants the correct set of privileges' do
+        binding.save
+
+        grants = connection.select_values("SHOW GRANTS FOR #{username}")
+
+        matching_grants = grants.select { |grant| grant.match(/GRANT .* ON `#{database}`\.\* TO '#{username}'@'%'/) }
+
+        expect(matching_grants.length).to eq(1)
+        expect(matching_grants[0]).to include("GRANT SELECT ON")
+      end
+    end
   end
 
   describe '#destroy' do
@@ -267,6 +315,18 @@ SQL
         expect {
           connection.select_values("SHOW GRANTS FOR #{username}")
         }.to raise_error(ActiveRecord::StatementInvalid, /no such grant/)
+      end
+
+      context 'when the user is read-only' do
+        let(:binding) { ServiceBinding.new(id: id, service_instance: instance, read_only: true) }
+
+        it 'also deletes the ReadOnlyUser record' do
+          expect(ReadOnlyUser.find_by_username(binding.username)).to be_present
+
+          binding.destroy
+
+          expect(ReadOnlyUser.find_by_username(binding.username)).not_to be_present
+        end
       end
     end
 
@@ -293,8 +353,12 @@ SQL
     let(:port) { connection_config.fetch('port') }
     let(:uri) { "mysql://#{username}:#{password}@#{host}:#{port}/#{database}?reconnect=true" }
     let(:jdbc_url) { "jdbc:mysql://#{host}:#{port}/#{database}?user=#{username}&password=#{password}" }
+    let(:tls_ca_certificate) { nil }
 
-    before { binding.save }
+    before do
+      allow(Settings).to receive(:[]).with('tls_ca_certificate').and_return(tls_ca_certificate)
+      binding.save
+    end
 
     it 'includes the credentials' do
       hash = JSON.parse(binding.to_json)
@@ -306,6 +370,23 @@ SQL
       expect(credentials.fetch('password')).to eq(password)
       expect(credentials.fetch('uri')).to eq(uri)
       expect(credentials.fetch('jdbcUrl')).to eq(jdbc_url)
+      expect(credentials).to_not have_key('ca_certificate')
+    end
+
+    context 'when the broker starts with a ca cert' do
+      let(:tls_ca_certificate) { 'this-is-a-ca-certificate' }
+
+      it 'includes the ca_certificate' do
+        hash = JSON.parse(binding.to_json)
+        credentials = hash.fetch('credentials')
+        expect(credentials.fetch('ca_certificate')).to eq(tls_ca_certificate)
+      end
+
+      it 'adds useSSL to the jdbc url' do
+        hash = JSON.parse(binding.to_json)
+        credentials = hash.fetch('credentials')
+        expect(credentials.fetch('jdbcUrl')).to eq("#{jdbc_url}&useSSL=true&enabledTLSProtocols=TLSv1.2&enabledSslProtocolSuites=TLSv1.2")
+      end
     end
   end
 end

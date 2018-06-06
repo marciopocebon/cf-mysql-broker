@@ -6,7 +6,7 @@ gem 'rails', '~> 4.2'
 gem 'rails-api'
 gem 'jquery-rails'
 gem 'settingslogic'
-gem 'mysql2'
+gem 'mysql2', '< 0.5'
 gem 'omniauth-uaa-oauth2', git: 'https://github.com/cloudfoundry/omniauth-uaa-oauth2'
 gem 'nats'
 gem 'sass-rails'
@@ -26,6 +26,6 @@ group :development, :test do
 end
 
 group :test do
-  gem 'codeclimate-test-reporter', require: nil
+  gem 'codeclimate-test-reporter', '~> 0.6.0', require: nil
   gem 'webmock'
 end

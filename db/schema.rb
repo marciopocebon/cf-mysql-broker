@@ -11,7 +11,17 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 20140918004518) do
+ActiveRecord::Schema.define(version: 20180117002358) do
+
+  create_table "read_only_users", force: :cascade do |t|
+    t.string   "username",   limit: 255
+    t.string   "grantee",    limit: 255
+    t.datetime "created_at",             null: false
+    t.datetime "updated_at",             null: false
+  end
+
+  add_index "read_only_users", ["grantee"], name: "index_read_only_users_on_grantee", using: :btree
+  add_index "read_only_users", ["username"], name: "index_read_only_users_on_username", using: :btree
 
   create_table "service_instances", force: :cascade do |t|
     t.string  "guid",           limit: 255

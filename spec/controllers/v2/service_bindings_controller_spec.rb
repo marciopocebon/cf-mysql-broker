@@ -16,6 +16,7 @@ describe V2::ServiceBindingsController do
     instance.save
 
     allow(Database).to receive(:exists?).with(database).and_return(true)
+    allow(Settings).to receive(:allow_table_locks).and_return(true)
   end
 
   after { instance.destroy }
@@ -64,6 +65,66 @@ describe V2::ServiceBindingsController do
           'jdbcUrl' => "jdbc:mysql://#{database_host}:#{database_port}/#{generated_dbname}?user=#{generated_username}&password=#{generated_password}",
           'uri' => "mysql://#{generated_username}:#{generated_password}@#{database_host}:#{database_port}/#{generated_dbname}?reconnect=true",
         )
+      end
+
+      context 'when the read-only parameter is set to the boolean value true' do
+        let(:make_request) { put :update, id: binding_id, service_instance_id: instance_guid, parameters: {'read-only' => true} }
+        before { allow(ServiceBinding).to receive(:new).and_call_original }
+
+        it 'creates a binding with read_only: true' do
+          make_request
+
+          expect(ServiceBinding).to have_received(:new).with(id: binding_id, service_instance: instance_of(ServiceInstance), read_only: true)
+        end
+      end
+
+      context 'when the read-only parameter is not set' do
+        let(:make_request) { put :update, id: binding_id, service_instance_id: instance_guid }
+        before { allow(ServiceBinding).to receive(:new).and_call_original }
+
+        it 'creates a binding with default read_only: false' do
+          make_request
+
+          expect(ServiceBinding).to have_received(:new).with(id: binding_id, service_instance: instance_of(ServiceInstance), read_only: false)
+        end
+      end
+
+      context 'when the read-only parameter has a non-boolean value' do
+        let(:make_request) { put :update, id: binding_id, service_instance_id: instance_guid, parameters: {'read-only' => 'true'} }
+
+        it 'does not create a binding' do
+          make_request
+          expect(ServiceBinding.exists?(id: binding_id, service_instance_guid: instance_guid)).to eq(false)
+        end
+
+        it 'returns a 400 and an error message' do
+          make_request
+
+          expect(response.status).to eq(400)
+          expect(JSON.parse(response.body)).to eq({
+            "error" => "Error creating service binding",
+            "description" => "Invalid arbitrary parameter syntax. Please check the documentation for supported arbitrary parameters.",
+          })
+        end
+      end
+
+      context 'when an invalid parameter is provided' do
+        let(:make_request) { put :update, id: binding_id, service_instance_id: instance_guid, parameters: {'unexpected-parameter' => true} }
+
+        it 'does not create a binding' do
+          make_request
+          expect(ServiceBinding.exists?(id: binding_id, service_instance_guid: instance_guid)).to eq(false)
+        end
+
+        it 'returns a 400 and an error message' do
+          make_request
+
+          expect(response.status).to eq(400)
+          expect(JSON.parse(response.body)).to eq({
+            "error" => "Error creating service binding",
+            "description" => "Invalid arbitrary parameter syntax. Please check the documentation for supported arbitrary parameters.",
+          })
+        end
       end
     end
 
