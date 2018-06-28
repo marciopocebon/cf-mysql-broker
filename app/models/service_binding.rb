@@ -2,7 +2,7 @@ require Rails.root.join('lib/service_instance_manager')
 
 class DatabaseNotFoundError < StandardError; end
 class ServiceBinding < BaseModel
-  attr_accessor :id, :service_instance, :read_only
+  attr_accessor :id, :service_instance, :read_only, :failover
 
   def self.find_by_id(id)
     binding = new(id: id)
@@ -43,6 +43,10 @@ class ServiceBinding < BaseModel
 
   def host
     connection_config.fetch('host')
+  end
+
+  def all_hosts
+    Settings['all_hosts']
   end
 
   def port
@@ -167,6 +171,10 @@ SQL
   end
 
   def jdbc_url
-    "jdbc:mysql://#{host}:#{port}/#{database_name}?user=#{username}&password=#{password}#{ssl_arguments}"
+    if failover 
+      "jdbc:mysql://#{all_hosts}/#{database_name}?user=#{username}&password=#{password}#{ssl_arguments}"
+    else
+      "jdbc:mysql://#{host}:#{port}/#{database_name}?user=#{username}&password=#{password}#{ssl_arguments}"
+    end
   end
 end

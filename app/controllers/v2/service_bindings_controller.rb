@@ -1,5 +1,5 @@
 class V2::ServiceBindingsController < V2::BaseController
-  ALLOWED_BINDING_PARAMETERS = ['read-only']
+  ALLOWED_BINDING_PARAMETERS = ['read-only', 'failover']
 
   def update
     instance = ServiceInstance.find_by_guid(params.fetch(:service_instance_id))
@@ -12,9 +12,11 @@ class V2::ServiceBindingsController < V2::BaseController
     binding_parameters_include_unknown_key = binding_parameters.keys.any? {|key| !ALLOWED_BINDING_PARAMETERS.include?(key)}
 
     read_only = binding_parameters.fetch('read-only', false)
+    failover = binding_parameters.fetch('failover', false)
     read_only_parameter_has_invalid_value = !read_only.in?([true, false])
+    failover_parameter_has_invalid_value = !failover.in?([true, false])
 
-    if binding_parameters_include_unknown_key || read_only_parameter_has_invalid_value
+    if binding_parameters_include_unknown_key || read_only_parameter_has_invalid_value || failover_parameter_has_invalid_value
       render status: 400, json: {
         "error" => "Error creating service binding",
         "description" => "Invalid arbitrary parameter syntax. Please check the documentation for supported arbitrary parameters.",
@@ -22,7 +24,7 @@ class V2::ServiceBindingsController < V2::BaseController
       return
     end
 
-    binding = ServiceBinding.new(id: params.fetch(:id), service_instance: instance, read_only: read_only)
+    binding = ServiceBinding.new(id: params.fetch(:id), service_instance: instance, read_only: read_only, failover: failover)
     binding.save
 
     render status: 201, json: binding
